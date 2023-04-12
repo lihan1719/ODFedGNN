@@ -1,4 +1,5 @@
 # ODFedGNN
+<<<<<<< HEAD
 
 
 ## Setup
