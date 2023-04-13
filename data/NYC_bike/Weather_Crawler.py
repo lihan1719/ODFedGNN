@@ -1,4 +1,5 @@
 #导入包
+import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -15,7 +16,13 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-file_path = 'data/NYC_bike/raw_bike_data/NYC_2019.h5'
+root = 'data/NYC_bike/raw_bike_data/'
+file_name = 'NYC_2019.h5'
+file_path = root + file_name
+
+if not os.path.exists(root):
+    # 如果文件夹路径不存在，则创建它
+    os.makedirs(root)
 
 
 def weather_crawler(date):
@@ -36,6 +43,29 @@ def weather_crawler(date):
             break
         except:
             time.sleep(3)
+    # 将时间列转换为 datetime 类型
+    weather_raw_data['Time'] = pd.to_datetime(weather_raw_data['Time'],
+                                              format='%I:%M %p')
+
+    # 计算第一个指针
+    first_pointer = None
+    for i in range(5):
+        if weather_raw_data['Time'][i] > weather_raw_data['Time'][i + 1]:
+            first_pointer = i
+            break
+
+    # 计算第二个指针
+    second_pointer = None
+    for i in range(len(weather_raw_data) - 6, len(weather_raw_data)):
+        if weather_raw_data['Time'][i] > weather_raw_data['Time'][i + 1]:
+            second_pointer = i + 1
+            break
+    if first_pointer is not None:
+        weather_raw_data.loc[:first_pointer, 'Time'] -= pd.DateOffset(days=1)
+
+    # 将最后一个指针及以下的时间设为下一天
+    if second_pointer is not None:
+        weather_raw_data.loc[second_pointer:, 'Time'] += pd.DateOffset(days=1)
     return weather_raw_data
 
 
@@ -44,7 +74,7 @@ results = []
 # 定义起始日期和结束日期
 date_last = '2018-12-31'
 start_date = datetime.strptime('2019-01-01', '%Y-%m-%d')
-end_date = datetime.strptime('2019-01-03', '%Y-%m-%d')
+end_date = datetime.strptime('2020-01-01', '%Y-%m-%d')
 
 # 循环生成每一天的日期格式
 current_date = start_date
