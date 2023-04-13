@@ -28,7 +28,7 @@ if not os.path.exists(root):
 def weather_crawler(date):
     option = webdriver.ChromeOptions()
     option.add_argument('headless')
-    option.binary_location = "C:/Program Files/Google/Chrome/Application/chrome.exe"
+    # option.binary_location = "C:/Program Files/Google/Chrome/Application/chrome.exe"
     url = 'https://www.wunderground.com/history/daily/KLGA/date/' + date
     #     print(url)
     while True:
@@ -44,8 +44,9 @@ def weather_crawler(date):
         except:
             time.sleep(3)
     # 将时间列转换为 datetime 类型
+    weather_raw_data['Time'] = date + ' ' + weather_raw_data['Time']
     weather_raw_data['Time'] = pd.to_datetime(weather_raw_data['Time'],
-                                              format='%I:%M %p')
+                                              format='%Y-%m-%d %I:%M %p')
 
     # 计算第一个指针
     first_pointer = None
