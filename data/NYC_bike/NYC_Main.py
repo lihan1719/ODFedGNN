@@ -8,7 +8,7 @@ t_s = '2019-07'
 t_e = '2019-07'
 # 读取数据
 bike_data = pd.read_hdf(h5_file, key='bike_data')
-weather_data = pd.read_hdf(h5_file, key='weather_data_raw')
+weather_data = pd.read_hdf(h5_file, key='weather_data')
 
 # 天气数据格式调整
 weather_data = unit_unify(raw=weather_data)

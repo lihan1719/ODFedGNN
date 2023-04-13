@@ -15,7 +15,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-file_path = 'data/NYC_bike/raw_bike_data/NYC_2019-w.h5'
+file_path = 'data/NYC_bike/raw_bike_data/NYC_2019.h5'
 
 
 def weather_crawler(date):
@@ -25,9 +25,7 @@ def weather_crawler(date):
     url = 'https://www.wunderground.com/history/daily/KLGA/date/' + date
     #     print(url)
     while True:
-        driver = webdriver.Chrome(
-            executable_path='C:/lihan/Scripts/chromedriver.exe',
-            options=option)
+        driver = webdriver.Chrome(options=option)
         driver.get(url)
         tables = WebDriverWait(driver, 100).until(
             EC.presence_of_all_elements_located((By.CSS_SELECTOR, "table")))
@@ -46,7 +44,7 @@ results = []
 # 定义起始日期和结束日期
 date_last = '2018-12-31'
 start_date = datetime.strptime('2019-01-01', '%Y-%m-%d')
-end_date = datetime.strptime('2020-1-03', '%Y-%m-%d')
+end_date = datetime.strptime('2019-01-03', '%Y-%m-%d')
 
 # 循环生成每一天的日期格式
 current_date = start_date

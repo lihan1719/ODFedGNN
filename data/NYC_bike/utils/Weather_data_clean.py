@@ -38,7 +38,7 @@ def unit_unify(raw=None):
 # 时间聚合
 def time_agg(data, frep='H'):
     start_date = '2019-1-1 01:00:00'
-    end_date = '2019-12-1'
+    end_date = '2020-1-1'
 
     # 生成时间索引
     time_index = pd.DataFrame(pd.date_range(start=start_date,
@@ -49,3 +49,8 @@ def time_agg(data, frep='H'):
     weather_data = time_index.join(
         data, how='left').fillna(method='ffill').fillna(method='bfill')
     return weather_data
+
+
+# 删除无用字段,整理成模型能识别的数据格式
+def drop_col(wethear_data, col):
+    wethear_data.drop(col, inplace=True)
