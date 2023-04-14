@@ -2,6 +2,35 @@
 import pandas as pd
 
 
+def classify_condition(condition):
+    if condition in ['Fair', 'Fair / Windy']:
+        return 'Sunny'
+    elif condition in [
+            'Mostly Cloudy', 'Partly Cloudy', 'Cloudy',
+            'Mostly Cloudy / Windy', 'Cloudy / Windy', 'Partly Cloudy / Windy'
+    ]:
+        return 'Cloudy'
+    elif condition in [
+            'Rain', 'Light Rain', 'Heavy Rain', 'Rain / Windy',
+            'Light Rain / Windy', 'Heavy Rain / Windy'
+    ]:
+        return 'Rainy'
+    elif condition in [
+            'Light Snow', 'Snow', 'Heavy Snow / Windy', 'Light Snow / Windy',
+            'Snow / Windy', 'Snow and Sleet', 'Light Snow and Sleet',
+            'Wintry Mix', 'Wintry Mix / Windy'
+    ]:
+        return 'Snowy'
+    elif condition in [
+            'T-Storm', 'Thunder', 'T-Storm / Windy', 'Heavy T-Storm / Windy',
+            'Heavy T-Storm', 'Thunder in the Vicinity', 'Thunder / Windy',
+            'Light Rain with Thunder'
+    ]:
+        return 'Thunderstorm'
+    else:
+        return 'Other'
+
+
 # 修改单位
 def unit_unify(raw=None):
     assert type(raw) != None
@@ -52,5 +81,14 @@ def time_agg(data, frep='H'):
 
 
 # 删除无用字段,整理成模型能识别的数据格式
-def drop_col(wethear_data, col):
-    wethear_data.drop(col, inplace=True)
+def tune_col(wethear_data, col):
+    wethear_data.drop(col, inplace=True, axis=1)
+    if 'Wind' in wethear_data.columns:
+        wethear_data['Wind'] = wethear_data['Wind'].astype(
+            'category').cat.codes
+    if 'Condition' in wethear_data.columns:
+        wethear_data['Condition'] = wethear_data['Condition'].apply(
+            classify_condition)
+        wethear_data['Condition'] = wethear_data['Condition'].astype(
+            'category').cat.codes
+    return wethear_data

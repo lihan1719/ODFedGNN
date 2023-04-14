@@ -6,7 +6,9 @@ import multiprocessing as mp
 import geopandas as gpd
 import pandas as pd
 import os
-from utils.Data_Loader import *
+from utils.BOD_preprocess import rm_out
+from utils.Mapping_Grid import *
+from utils import *
 
 
 def clean_grid(od_gdf, grid=False):
@@ -38,23 +40,15 @@ def clean_grid(od_gdf, grid=False):
     return od_data
 
 
-if __name__ == '__main__':
-    # 需要修改的参数
-    time_start = '201907'  #时间格式，必须全为数字
-    time_end = '201909'
-    accuracy = 500
-    region_file = 'data/NYC_bike/raw_bike_data/Manhattan_half.json'
-
-    h5_file_name = 'nyc_bike_data_07-09_experiment1.h5'
-    # h5_file_name = 'nyc_bike_data' + '_' + time_start + '-' + time_end + '.h5'  # h5 文件名称
-    h5_path = 'data/NYC_bike/raw_bike_data/'  # 目标路径
-    h5_file = h5_path + h5_file_name
-
-    geo_bounds, params = get_bounds(region_file, accuracy=accuracy)
-    bike_data = get_data(h5_file, geo_bounds)
-    od_gdf = tbd.odagg_grid(bike_data.copy(deep=True), params, arrow=True)
-    od_data = clean_grid(od_gdf, grid=True)
-    # 保存到文件
-    print('写入文件...')
-    with pd.HDFStore(h5_file, mode='a') as store:
-        store.put('mapping_grid_500', od_data, data_columns=True)
+# 得到mapping_grid
+def get_map(bike_data, region_file, grid_size, t_s, t_e):
+    _, params = gird_vis(grid_size=grid_size, region_file=region_file)
+    area = gpd.read_file(region_file)
+    bike_data = rm_out(bike_data, area)
+    bike_data['stime'] = pd.to_datetime(bike_data['stime'])
+    bike_data.set_index('stime', inplace=True)
+    bike_data = bike_data[t_s:t_e]
+    od_grid = tbd.odagg_grid(bike_data.copy(deep=True), params,
+                             arrow=True)  # OD集记
+    mapping_grid = clean_grid(od_grid, grid=True)
+    return mapping_grid
