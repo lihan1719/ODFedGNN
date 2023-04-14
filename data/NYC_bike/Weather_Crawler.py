@@ -10,7 +10,6 @@ import time
 import numpy as np
 from datetime import datetime, timedelta
 from selenium import webdriver
-
 #相关设置
 import warnings
 
@@ -58,9 +57,14 @@ def weather_crawler(date):
     # 计算第二个指针
     second_pointer = None
     for i in range(len(weather_raw_data) - 6, len(weather_raw_data)):
+        if i + 1 >= len(weather_raw_data):
+            break
         if weather_raw_data['Time'][i] > weather_raw_data['Time'][i + 1]:
             second_pointer = i + 1
             break
+    if first_pointer is not None:
+        weather_raw_data.loc[:first_pointer, 'Time'] -= pd.DateOffset(days=1)
+
     if first_pointer is not None:
         weather_raw_data.loc[:first_pointer, 'Time'] -= pd.DateOffset(days=1)
 
