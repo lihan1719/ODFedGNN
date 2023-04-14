@@ -20,3 +20,4 @@ output
 utils/__pycache__
 test
 cash
+.vscode/*
