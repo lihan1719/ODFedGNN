@@ -3,43 +3,31 @@
 # 导入包
 from argparse import ArgumentParser
 from functools import partial
-from utils.Mapping_Grid import *
+import geopandas as gpd
 import torch
 from scipy.spatial.distance import cdist
-from haversine import haversine
+from haversine import haversine, Unit
 import os
 import multiprocessing as mp
+import transbigdata as tbd
+import pandas as pd
+import numpy as np
+from .TO_OD import *
 
 
 # cpu并行OD矩阵转化
-def parallel_convert(chunk, params=None, od_final=None):
-    od_gdf = tbd.odagg_grid(chunk.copy(deep=True), params, arrow=True)
-    #快速给栅格编号并进行合并
-    od_data = clean_grid(od_gdf)
-    od_now = od_data.pivot_table(index='s_index',
-                                 columns='e_index',
-                                 values=['count'],
-                                 fill_value=0,
-                                 aggfunc=np.sum)
-
-    od_now = od_now.droplevel(level=0, axis=1)
-    result = od_final.add(od_now).fillna(0)
-
-    return result.values
+def parallel_convert(chunk, grid_rec, params):
+    oddata = tbd.odagg_grid(chunk, params, arrow=True)
+    od = process_hourly_data(
+        oddata, grid_rec)
+    return od
 
 
 # OD矩阵
-def Bike2OD(bike_data, mapping_grid, params, time_granularity):
-    od_final = pd.DataFrame(0,
-                            index=mapping_grid['s_index'],
-                            columns=mapping_grid['s_index'])
-    od_final.columns.name = 'e_index'
-    od_final.index.name = 's_index'
-    od_final.index = od_final.index.astype('int')
-    od_final.columns = od_final.columns.astype('int')
+def Bike2OD(bike_data, grid_rec, params, time_granularity):
     # 将数据分块，做并行处理
     chunks = [group for _, group in bike_data.resample(rule=time_granularity)]
-    partial_func = partial(parallel_convert, params=params, od_final=od_final)
+    partial_func = partial(parallel_convert, grid_rec=grid_rec, params=params)
     with mp.Pool(processes=mp.cpu_count()) as pool:
         results = pool.map(
             partial_func,
@@ -53,26 +41,59 @@ def Bike2OD(bike_data, mapping_grid, params, time_granularity):
 
 
 # Geo 邻居矩阵
-def get_adj(mapping_grid, accuracy):
-    # 获取邻接矩阵
+# def get_adj(mapping_grid, accuracy):
+#     # 获取邻接矩阵
 
-    distance_matrix = cdist(mapping_grid[['SHBLON', 'SHBLAT']],
-                            mapping_grid[['SHBLON', 'SHBLAT']],
-                            metric=haversine)
-    distance_threshold = accuracy / 1000 + 0.1  # km
+#     distance_matrix = cdist(mapping_grid[['SHBLON', 'SHBLAT']],
+#                             mapping_grid[['SHBLON', 'SHBLAT']],
+#                             metric=haversine)
+#     distance_threshold = accuracy / 1000 + 0.1  # km
+#     adjacency_matrix = np.where(distance_matrix <= distance_threshold, 1, 0)
+#     adj = pd.DataFrame(adjacency_matrix,
+#                        index=mapping_grid['s_index'],
+#                        columns=mapping_grid['s_index'])
+#     adj = adj.sort_index(axis=0).sort_index(axis=1)
+#     print('邻接矩阵的shape:{}'.format(adj.shape))
+#     return adj
+
+
+def haversine_wrapper(u, v):
+    return haversine(u, v, unit=Unit.KILOMETERS)
+
+
+def get_adj(grid_rec, accuracy):
+    # 获取邻接矩阵
+    grid_count = len(grid_rec)
+    adj_matrix = np.zeros((grid_count, grid_count))
+    # 计算栅格中心的经纬度坐标
+    centroids = mapping_grid.geometry.centroid
+    lon_lat = centroids.apply(lambda p: (p.x, p.y)).tolist()
+
+    # 计算距离矩阵
+    distance_matrix = cdist(lon_lat, lon_lat, metric=haversine_wrapper)
+
+    # 设置距离阈值
+    distance_threshold = 0.1  # km
+
+    # 根据距离阈值创建邻接矩阵
     adjacency_matrix = np.where(distance_matrix <= distance_threshold, 1, 0)
+
+    # 将邻接矩阵转换为pandas DataFrame
     adj = pd.DataFrame(adjacency_matrix,
                        index=mapping_grid['s_index'],
                        columns=mapping_grid['s_index'])
+
+    # 按照索引排序
     adj = adj.sort_index(axis=0).sort_index(axis=1)
+
     print('邻接矩阵的shape:{}'.format(adj.shape))
     return adj
 
 
-def split_data(data, train_size, val_size):
+def split_data(data, train_size, val_size, step):
     print('正在划分数据集')
-    X_list = list(range(4, 0, -1))
-    Y_list = list(range(4))
+    X_list = list(range(step, 0, -1))
+    Y_list = list(range(step))
 
     X_ = np.array([[data[i - j] for j in X_list]
                    for i in range(max(X_list), data.shape[0] - max(Y_list))],
@@ -115,10 +136,14 @@ def split_data(data, train_size, val_size):
 
 # 剔除研究区域外、行驶距离过长过短的共享单车记录
 def rm_out(data, geo_bounds):
-    bike_data = tbd.clean_outofshape(data, geo_bounds, col=['slon', 'slat'])
+    bike_data = tbd.clean_outofshape(data,
+                                     geo_bounds,
+                                     col=['slon', 'slat'],
+                                     accuracy=100)
     bike_data = tbd.clean_outofshape(bike_data,
                                      geo_bounds,
-                                     col=['elon', 'elat'])
+                                     col=['elon', 'elat'],
+                                     accuracy=100)
     print(len(bike_data) / len(data))
     #剔除过长与过短的共享单车出行
     bike_data['distance'] = tbd.getdistance(bike_data['slon'],

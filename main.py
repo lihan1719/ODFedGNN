@@ -12,7 +12,7 @@ import models
 from utils import SaveNodeEncodings
 
 #导入模型
-from models.od_prediction.od_Centralized import *
+from models.od_prediction.NYC_Centralized import *
 
 import warnings
 

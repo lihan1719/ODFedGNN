@@ -64,31 +64,12 @@ def unit_unify(raw=None):
     return raw
 
 
-# 时间聚合
-def time_agg(data, frep='H'):
-    start_date = '2019-1-1 01:00:00'
-    end_date = '2020-1-1'
-
-    # 生成时间索引
-    time_index = pd.DataFrame(pd.date_range(start=start_date,
-                                            end=end_date,
-                                            freq=frep),
-                              columns=['Time'])
-    time_index.set_index('Time', inplace=True)
-    weather_data = time_index.join(
-        data, how='left').fillna(method='ffill').fillna(method='bfill')
-    return weather_data
-
-
 # 删除无用字段,整理成模型能识别的数据格式
-def tune_col(wethear_data, col):
+def tune_col(wethear_data, col, train=True):
     wethear_data.drop(col, inplace=True, axis=1)
-    if 'Wind' in wethear_data.columns:
-        wethear_data['Wind'] = wethear_data['Wind'].astype(
-            'category').cat.codes
-    if 'Condition' in wethear_data.columns:
-        wethear_data['Condition'] = wethear_data['Condition'].apply(
-            classify_condition)
+    wethear_data['Condition'] = wethear_data['Condition'].apply(
+        classify_condition)
+    if train != False:
         wethear_data['Condition'] = wethear_data['Condition'].astype(
             'category').cat.codes
     return wethear_data

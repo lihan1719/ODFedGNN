@@ -343,27 +343,25 @@ available_datasets = {
 #读取NYC数据集
 def load_nyc_data(path, data_name):
     #读取自制的NYC数据集
-
-    data_path = os.path.join(path, '{}.npz'.format(data_name))
-    data = np.load(data_path)
-    adj_mx_ts = torch.from_numpy(data['adj']).float()
+    adj = np.load(path + 'Geo_adj_Grid300m.npy')
+    adj_mx_ts = torch.from_numpy(adj).float()
     train_adj_mx_ts, eval_adj_mx_ts = adj_mx_ts, adj_mx_ts
     train_edge_index, train_edge_attr = dense_to_sparse(train_adj_mx_ts)
     eval_edge_index, eval_edge_attr = dense_to_sparse(eval_adj_mx_ts)
     raw_data = {}
     #划分数据集载入
     for name in ['train', 'val', 'test']:
-        raw_data[name] = np.load(
-            os.path.join(path, '{}.npz'.format('bike_od' + '_' + name)))
+        file = 'NYC_BOD_' + name + '_' + data_name + '.npz'
+        raw_data[name] = np.load(os.path.join(path, file))
     print("训练shape:{}".format(raw_data['train']['x'].shape))
     print("验证shape:{}".format(raw_data['val']['x'].shape))
     print("测试shape:{}".format(raw_data['test']['x'].shape))
     #分离，od需求量与其他辅助特征
     FEATURE_START, FEATURE_END = 0, raw_data['train']['x'].shape[2]
     ATTR_START = raw_data['train']['x'].shape[2]
-
     #初始化scaler
-    # train_features = raw_data['train']['x'][..., FEATURE_START:FEATURE_END]
+    # train_features = raw_data['train']['x'][...,
+    #                                         FEATURE_START:FEATURE_END] + 90
     # train_features = train_features.reshape(-1, train_features.shape[-1])
     attr_features = raw_data['train']['x'][..., ATTR_START:]
     attr_features = attr_features.reshape(-1, attr_features.shape[-1])
@@ -376,14 +374,13 @@ def load_nyc_data(path, data_name):
         'feature_scaler': feature_scaler,
         'attr_scaler': attr_scaler
     }
-
     for name in ['train', 'val', 'test']:
         # x = feature_scaler.transform(
-        #     raw_data[name]['x'][..., FEATURE_START:FEATURE_END])
+        #     raw_data[name]['x'][..., FEATURE_START:FEATURE_END] + 90)
         # y = feature_scaler.transform(
-        #     raw_data[name]['y'][..., FEATURE_START:FEATURE_END])
-        x = raw_data[name]['x'][..., FEATURE_START:FEATURE_END]
-        y = raw_data[name]['y'][..., FEATURE_START:FEATURE_END]
+        #     raw_data[name]['y'][..., FEATURE_START:FEATURE_END] + 90)
+        x = np.log(raw_data[name]['x'][..., FEATURE_START:FEATURE_END] + 1.0)
+        y = np.log(raw_data[name]['y'][..., FEATURE_START:FEATURE_END] + 1.0)
         x_attr = attr_scaler.transform(raw_data[name]['x'][..., ATTR_START:])
         y_attr = attr_scaler.transform(raw_data[name]['y'][..., ATTR_START:])
 
@@ -399,7 +396,6 @@ def load_nyc_data(path, data_name):
                     edge_index=edge_index,
                     edge_attr=edge_attr)
         loaded_data[name] = data
-
     return loaded_data
 
 

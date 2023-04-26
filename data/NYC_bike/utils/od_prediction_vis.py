@@ -2,9 +2,12 @@
 
 import pandas as pd
 import numpy as np
-from utils.Mapping_Grid import *
 import geopandas as gpd
-from utils import *
+import transbigdata as tbd
+from .BOD_preprocess import rm_out
+
+from .Grid_split_Vis import gird_gen
+from .Mapping_Grid import clean_grid
 
 
 #----------------------------------------------------------------------------------------------
@@ -32,12 +35,29 @@ def od2map(od_metric, OD_map, mapping_grid):
     return odmapped
 
 
+# 得到mapping_grid
+def get_map_grid(bike_data, region_file, grid_size, grid, t_s, t_e):
+    _, params = gird_gen(grid_size=grid_size, region_file=region_file)
+    area = gpd.read_file(region_file)
+    bike_data = rm_out(bike_data, area)
+    bike_data['stime'] = pd.to_datetime(bike_data['stime'])
+    bike_data.set_index('stime', inplace=True)
+    bike_data = bike_data[t_s:t_e]
+    od_grid = tbd.odagg_grid(bike_data.copy(deep=True), params,
+                             arrow=True)  # OD集记
+    if grid == True:
+        mapping_grid = clean_grid(od_grid, grid=True)
+    else:
+        mapping_grid = clean_grid(od_grid, grid=False)
+    return mapping_grid, params, bike_data
+
+
 if __name__ == '__main__':
     # for debug
     t_s = '2019-07'
     t_e = '2019-07'
     Bike_file = 'data/NYC_bike/raw_bike_data/NYC_Bike.csv'
-    region_file = 'data/NYC_bike/raw_bike_data/Manhattan_v2.json'
+    region_file = 'data/NYC_bike/raw_bike_data/Manhattan.json'
     grid_size = 300
     time_granularity = '15T'
     predict_file = './output/2019-07_2019-07_grid_300_15T_od_prediction.npy'
@@ -51,8 +71,8 @@ if __name__ == '__main__':
     od_prediction = np.round(np.clip(od_prediction, a_min=0,
                                      a_max=None)).astype(int)
     bike_data = pd.read_csv(Bike_file)
-    mapping_grid = get_map(bike_data, region_file, grid_size, t_s, t_e)
-    _, params = gird_vis(grid_size=grid_size, region_file=region_file)
+    mapping_grid = get_map_grid(bike_data, region_file, grid_size, t_s, t_e)
+    _, params = gird_gen(grid_size=grid_size, region_file=region_file)
     od_grid = tbd.odagg_grid(bike_data.copy(deep=True), params, arrow=True)
     OD_map = clean_grid(od_grid, grid=False).drop(['count'], axis=1)
     _ = od2map(od_true[0, 0, :, :], OD_map, mapping_grid)
