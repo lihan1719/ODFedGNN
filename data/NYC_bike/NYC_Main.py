@@ -26,8 +26,8 @@ time_granularity = '60T'
 nyc_bod = out_dir + 'NYC_BOD_{0}-{1}_Grid{2}m_{3}.npy'.format(
     t_s, t_e, grid_size, time_granularity)
 geo_adj = out_dir + 'Geo_adj_Grid{0}m.npy'.format(grid_size)
-nyc_w = out_dir + 'NYC_Weather_{0}_{1}_{2}.csv'.format(t_s, t_e,
-                                                       time_granularity)
+nyc_w = out_dir + 'NYC_Weather_{0}_{1}_{2}_model.csv'.format(
+    t_s, t_e, time_granularity)
 
 #-----------------------------------------------------------------------------
 
@@ -48,8 +48,8 @@ if not (os.path.isfile(nyc_bod) and os.path.isfile(geo_adj)
     weather_data = weather_data[t_s:t_e]
     weather_data = unit_unify(raw=weather_data)
     weather_data = weather_data.resample('H').first().fillna(method='ffill')
-    weather_data = tune_col(weather_data, drop_col, train=False)
-    # weather_data.to_csv(nyc_w)
+    weather_data = tune_col(weather_data, drop_col)
+    weather_data.to_csv(nyc_w, index=False)
     #-----------------------------------------------------------------------------
     # Bike OD数据转换
     geobound = gpd.read_file(region_file)

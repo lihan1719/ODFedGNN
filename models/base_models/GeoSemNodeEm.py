@@ -69,17 +69,17 @@ class GeoSemNodeEm(nn.Module):
         last_node_input_size = node_input_size
         for _ in range(gn_layer_num):
             # 地理信息聚合
-            # geo_node_model = NodeModel(last_node_input_size,
-            #                            hidden_size,
-            #                            node_output_size,
-            #                            activation=activation,
-            #                            dropout=dropout)
+            geo_node_model = NodeModel(last_node_input_size,
+                                       hidden_size,
+                                       node_output_size,
+                                       activation=activation,
+                                       dropout=dropout)
             # 语义信息聚合
-            semantic_node_model = NodeModel(last_node_input_size,
-                                            hidden_size,
-                                            node_output_size,
-                                            activation=activation,
-                                            dropout=dropout)
+            # semantic_node_model = NodeModel(last_node_input_size,
+            #                                 hidden_size,
+            #                                 node_output_size,
+            #                                 activation=activation,
+            #                                 dropout=dropout)
             last_node_input_size += node_output_size
             # self.geo_net.append(
             #     MetaLayer(edge_model=None,
@@ -87,7 +87,7 @@ class GeoSemNodeEm(nn.Module):
             #               global_model=None))
             self.semantic_net.append(
                 MetaLayer(edge_model=None,
-                          node_model=semantic_node_model,
+                          node_model=geo_node_model,
                           global_model=None))
         self.geo_net = nn.ModuleList(self.geo_net)
         self.semantic_net = nn.ModuleList(self.semantic_net)
@@ -95,25 +95,26 @@ class GeoSemNodeEm(nn.Module):
         # self.node_out_net = nn.Linear(2 * node_output_size, node_output_size)
         self.node_out_net = nn.Linear(node_output_size, node_output_size)
 
-    def forward(self, data, semantic_data):
+    def forward(self, data):
         x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr
         edge_attr = edge_attr.expand(-1, x.shape[1], x.shape[2], -1)
         for geo_layer, semantic_layer in zip(self.geo_net, self.semantic_net):
-            # updated_x_geo, _, _ = geo_layer(x, edge_index, edge_attr)
+            updated_x_geo, _, _ = geo_layer(x, edge_index, edge_attr)
             # # 语义信息聚合
-            updated_semantic = []
-            for i in range(x.shape[1]):
-                semantic_edge_index, semantic_edge_attr = dense_to_sparse(
-                    semantic_data[i, 0, :, :])
-                semantic_edge_attr = semantic_edge_attr.unsqueeze(
-                    -1).unsqueeze(-1).to('cuda')
-                semantic_edge_attr = semantic_edge_attr.expand(
-                    -1, x.shape[2], -1)
-                updated_x_semantic, _, _ = semantic_layer(
-                    x[:, i, :, :], semantic_edge_index, semantic_edge_attr)
-                updated_semantic.append(updated_x_semantic)
-            updated_x_semantic = torch.stack(updated_semantic, dim=1)
-            x = updated_x_semantic
+            # updated_semantic = []
+            # for i in range(x.shape[1]):
+            #     semantic_edge_index, semantic_edge_attr = dense_to_sparse(
+            #         semantic_data[i, 0, :, :])
+            #     semantic_edge_attr = semantic_edge_attr.unsqueeze(
+            #         -1).unsqueeze(-1).to('cuda')
+            #     semantic_edge_attr = semantic_edge_attr.expand(
+            #         -1, x.shape[2], -1)
+            #     updated_x_semantic, _, _ = semantic_layer(
+            #         x[:, i, :, :], semantic_edge_index, semantic_edge_attr)
+            #     updated_semantic.append(updated_x_semantic)
+            # updated_x_semantic = torch.stack(updated_semantic, dim=1)
+            # x = updated_x_semantic
+            x = updated_x_geo
             # x = torch.cat([updated_x_geo, updated_x_semantic], dim=-1)
         node_out = self.node_out_net(x)
         return node_out

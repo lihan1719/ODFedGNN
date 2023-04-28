@@ -20,16 +20,10 @@ import wandb
 
 
 # 定义评价指标
-def unscaled_metrics(y_pred, y, name):
-    y_pred = np.exp(y_pred.detach().cpu()) - 1.0
-    y = np.exp(y_pred.detach().cpu()) - 1.0
-    # if scaler == None:
-    #     y = y.detach().cpu()
-    #     y_pred = y_pred.detach().cpu()
-    # else:
-    #     y = scaler.inverse_transform(y.detach().cpu()) - 90
-    #     y_pred = scaler.inverse_transform(y_pred.detach().cpu()) - 90
-    # mse
+def unscaled_metrics(y_pred, y, name, od_max, od_min):
+    y_pred = y_pred.detach().cpu() * (od_max - od_min) + od_min
+    y = y.detach().cpu() * (od_max - od_min) + od_min
+
     mse = ((y_pred - y)**2).mean()
     # RMSE
     rmse = torch.sqrt(mse)

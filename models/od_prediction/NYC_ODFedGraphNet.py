@@ -1,12 +1,16 @@
 # Two Stage Dynamic OD predictor
 from argparse import ArgumentParser
+from copy import deepcopy
+import os
 import numpy as np
 from pytorch_lightning import LightningModule
 import torch
 import torch.nn as nn
 from torch_geometric.data import DataLoader, Data
 from collections import defaultdict
-from NYCDataset.datasets import load_nyc_data
+
+import wandb
+from NYCDataset.datasets import load_nyc_data, ODsplit_nyc_data
 from torch.utils.data import TensorDataset
 
 import models.base_models as base_models
@@ -18,7 +22,7 @@ class ODFedNodePredictorClient(nn.Module):
     def __init__(self, base_model_name, optimizer_name, train_dataset,
                  val_dataset, test_dataset, sync_every_n_epoch, lr,
                  weight_decay, batch_size, client_device, start_global_step,
-                 *args, **kwargs):
+                 od_max, od_min, *args, **kwargs):
         super().__init__()
         self.base_model_name = base_model_name
         self.optimizer_name = optimizer_name
@@ -31,6 +35,8 @@ class ODFedNodePredictorClient(nn.Module):
         self.batch_size = batch_size
         self.base_model_kwargs = kwargs
         self.device = client_device
+        self.od_max = od_max
+        self.od_min = od_min
 
         self.base_model_class = getattr(base_models, self.base_model_name)
         self.init_base_model(None)
@@ -96,7 +102,8 @@ class ODFedNodePredictorClient(nn.Module):
                     loss.backward()
                     self.optimizer.step()
                     num_samples += x.shape[0]
-                    metrics = unscaled_metrics(y_pred, y, 'train')
+                    metrics = unscaled_metrics(y_pred, y, 'train', self.od_max,
+                                               self.od_min)
                     epoch_log['train/weight_loss'] += loss.detach(
                     ) * x.shape[0]
                     for k in metrics:
@@ -139,7 +146,8 @@ class ODFedNodePredictorClient(nn.Module):
                     od_prediction.append(np.exp(y_pred.detach().cpu()) - 1.0)
                 loss = nn.MSELoss()(y_pred, y)
                 num_samples += x.shape[0]
-                metrics = unscaled_metrics(y_pred, y, name)
+                metrics = unscaled_metrics(y_pred, y, name, self.od_max,
+                                           self.od_min)
                 epoch_log['{}/weighted_loss'.format(
                     name)] += loss.detach() * x.shape[0]
                 for k in metrics:
@@ -237,8 +245,8 @@ class ODFedNodePredictorServer(LightningModule):
         # must avoid repeated init!!! otherwise loaded model weights will be re-initialized!!!
         if self.base_model is not None:
             return
-        data = load_nyc_data(path=self.hparams.data_dir,
-                             data_name=self.hparams.data_name)
+        data = ODsplit_nyc_data(path=self.hparams.data_dir,
+                                data_name=self.hparams.data_name)
         self.data = data
         # Each node (client) has its own model and optimizer
         # Assigning data, model and optimizer for each client
@@ -252,18 +260,19 @@ class ODFedNodePredictorServer(LightningModule):
             for name in ['train', 'val', 'test']:
                 client_datasets[name] = TensorDataset(
                     data[name]['x'][:, :, client_i:client_i + 1, :],
-                    data[name]['y'][:, :, client_i:client_i + 1, :],
+                    data[name]['y'][:, client_i:client_i + 1, :],
                     data[name]['x_attr'][:, :, client_i:client_i + 1, :],
-                    data[name]['y_attr'][:, :, client_i:client_i + 1, :],
-                    #需要加一个node进去
-                    torch.zeros(1, num_clients, data[name]['x'].shape[0],
+                    data[name]['y_attr'][:, client_i:client_i + 1, :],
+                    torch.zeros(1, data[name]['x'].shape[0],
                                 self.hparams.gru_num_layers,
                                 self.hparams.hidden_size).float().permute(
-                                    2, 0, 1, 3,
-                                    4)  # default_server_graph_encoding
+                                    1, 0, 2,
+                                    3)  # default_server_graph_encoding
                 )
             client_params = {}
             client_params.update(optimizer_name='Adam',
+                                 od_max=data['od_max'],
+                                 od_min=data['od_min'],
                                  train_dataset=client_datasets['train'],
                                  val_dataset=client_datasets['val'],
                                  test_dataset=client_datasets['test'],
@@ -340,17 +349,15 @@ class ODFedNodePredictorServer(LightningModule):
                     batch_num, node_num = data['x'].shape[0], data['x'].shape[
                         2]
                     graph_encoding = h_encode.view(
-                        h_encode.shape[0], batch_num, node_num, node_num,
-                        h_encode.shape[2]).permute(2, 3, 1, 0,
-                                                   4)  # N x B x L x F
+                        h_encode.shape[0], batch_num, node_num,
+                        h_encode.shape[2]).permute(2, 1, 0, 3)  # N x B x L x F
                     graph_encoding = self.gcn(
                         Data(x=graph_encoding,
                              edge_index=self.data['train']['edge_index'].to(
                                  graph_encoding.device),
-                             edge_attr=self.data['train']
-                             ['edge_attr'].unsqueeze(-1).unsqueeze(
-                                 -1).unsqueeze(-1).unsqueeze(-1).to(
-                                     graph_encoding.device)))
+                             edge_attr=self.data['train']['edge_attr'].
+                             unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).to(
+                                 graph_encoding.device)))
                     # N x B x L x F
                     if epoch_i == self.hparams.server_epoch:
                         updated_graph_encoding.append(
@@ -372,7 +379,7 @@ class ODFedNodePredictorServer(LightningModule):
             client_params.update(start_global_step=global_step)
         # update server_graph_encoding
         updated_graph_encoding = torch.cat(updated_graph_encoding,
-                                           dim=2)  # N x B x L x F
+                                           dim=1)  # N x B x L x F
         sel_client_i = 0
         for client_i, client_params in enumerate(self.client_params_list):
             if 'selected' in self.data['train']:
@@ -380,13 +387,13 @@ class ODFedNodePredictorServer(LightningModule):
                     continue
             client_params.update(train_dataset=TensorDataset(
                 self.data['train']['x'][:, :, client_i:client_i + 1, :],
-                self.data['train']['y'][:, :, client_i:client_i +
+                self.data['train']['y'][:, client_i:client_i +
                                         1, :], self.data['train']['x_attr']
                 [:, :, client_i:client_i +
-                 1, :], self.data['train']['y_attr'][:, :,
+                 1, :], self.data['train']['y_attr'][:,
                                                      client_i:client_i + 1, :],
                 updated_graph_encoding[sel_client_i:sel_client_i +
-                                       1, :, :, :].permute(2, 1, 0, 3, 4)))
+                                       1, :, :, :].permute(1, 0, 2, 3)))
             sel_client_i += 1
 
     def _eval_server_gcn_with_agg_clients(self, name, device):
@@ -414,39 +421,39 @@ class ODFedNodePredictorServer(LightningModule):
                 h_encode = self.base_model.forward_encoder(
                     data)  # L x (B x N) x F
                 batch_num, node_num = data['x'].shape[0], data['x'].shape[2]
-                graph_encoding = h_encode.view(
-                    h_encode.shape[0], batch_num, node_num, node_num,
-                    h_encode.shape[2]).permute(2, 3, 1, 0, 4)  # N x B x L x F
+                graph_encoding = h_encode.view(h_encode.shape[0], batch_num,
+                                               node_num,
+                                               h_encode.shape[2]).permute(
+                                                   2, 1, 0, 3)  # N x B x L x F
                 #上面是hc，i 下面是hs，i
                 graph_encoding = self.gcn(
                     Data(x=graph_encoding,
                          edge_index=self.data[name]['edge_index'].to(
                              graph_encoding.device),
                          edge_attr=self.data[name]['edge_attr'].unsqueeze(
-                             -1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).to(
+                             -1).unsqueeze(-1).unsqueeze(-1).to(
                                  graph_encoding.device)))  # N x B x L x F
                 updated_graph_encoding.append(
                     graph_encoding.detach().clone().cpu())
         # update server_graph_encoding
         updated_graph_encoding = torch.cat(updated_graph_encoding,
-                                           dim=2)  # N x B x L x F
+                                           dim=1)  # N x B x L x F
         for client_i, client_params in enumerate(self.client_params_list):
             keyname = '{}_dataset'.format(name)
             client_params.update({
                 keyname:
                 TensorDataset(
                     self.data[name]['x'][:, :, client_i:client_i + 1, :],
-                    self.data[name]['y'][:, :, client_i:client_i + 1, :],
+                    self.data[name]['y'][:, client_i:client_i + 1, :],
                     self.data[name]['x_attr'][:, :, client_i:client_i + 1, :],
-                    self.data[name]['y_attr'][:, :, client_i:client_i + 1, :],
+                    self.data[name]['y_attr'][:, client_i:client_i + 1, :],
                     updated_graph_encoding[client_i:client_i +
-                                           1, :, :, :].permute(2, 1, 0, 3, 4))
-                # B x N2 x client x L x F
+                                           1, :, :, :].permute(1, 0, 2, 3))
+                # B x N x L x F
             })
 
     def train_dataloader(self):
         # return a fake dataloader for running the loop
-        wandb.log({'epoch': self.current_epoch})
         return DataLoader([
             0,
         ])
@@ -479,7 +486,7 @@ class ODFedNodePredictorServer(LightningModule):
                     if self.data['train']['selected'][client_i,
                                                       0].item() is False:
                         continue
-                local_train_result = ODClient.client_local_execute(
+                local_train_result = ODFedNodePredictorClient.client_local_execute(
                     batch.device, deepcopy(self.base_model.state_dict()),
                     'train', client_params)
                 local_train_results.append(local_train_result)
@@ -597,7 +604,7 @@ class ODFedNodePredictorServer(LightningModule):
         self.gcn.to('cpu')
         if self.hparams.mp_worker_num <= 1:
             for client_i, client_params in enumerate(self.client_params_list):
-                local_val_result = ODClient.client_local_execute(
+                local_val_result = ODFedNodePredictorClient.client_local_execute(
                     batch.device, deepcopy(self.base_model.state_dict()),
                     'val', client_params)
                 local_val_results.append(local_val_result)
@@ -647,10 +654,10 @@ class ODFedNodePredictorServer(LightningModule):
         od_prediction = []
         if self.hparams.mp_worker_num <= 1:
             for client_i, client_params in enumerate(self.client_params_list):
-                local_val_result = ODClient.client_local_execute(
+                local_val_result = ODFedNodePredictorClient.client_local_execute(
                     batch.device, deepcopy(self.base_model.state_dict()),
                     'test', client_params)
-                y_pred = local_val_result.pop(1)
+                y_pred = local_val_result[0].pop('od_prediction')
                 od_prediction.append(y_pred)
                 local_val_results.append(local_val_result)
         else:
