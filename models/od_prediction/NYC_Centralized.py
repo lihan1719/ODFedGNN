@@ -20,20 +20,30 @@ import wandb
 
 
 # 定义评价指标
-def unscaled_metrics(y_pred, y, name, od_max, od_min):
+def unscaled_metrics(y_pred, y, name, od_max=176, od_min=0):
     # y_pred = y_pred.detach().cpu() * (od_max - od_min) + od_min
     # y = y.detach().cpu() * (od_max - od_min) + od_min
     y_pred = y_pred.detach().cpu()
     y = y.detach().cpu()
+
+    def WRMSE(y_pred, y_true):
+        errors = y_true - y_pred
+        squared_errors = errors**2
+        weighted_squared_errors = y_true * squared_errors
+        sum_weighted_squared_errors = torch.sum(weighted_squared_errors)
+        sum_weights = torch.sum(y_true)
+        return torch.sqrt(sum_weighted_squared_errors / sum_weights)
+
+    wrmse = WRMSE(y_pred, y)
+
     mse = ((y_pred - y)**2).mean()
     # RMSE
     rmse = torch.sqrt(mse)
     # MAE
     mae = torch.abs(y_pred - y).mean()
     return {
-        '{}/mse'.format(name): mse.detach(),
         '{}/rmse'.format(name): rmse.detach(),
-        '{}/mae'.format(name): mae.detach(),
+        '{}/wrmse'.format(name): wrmse.detach(),
     }
 
 

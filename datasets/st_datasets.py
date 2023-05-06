@@ -375,15 +375,14 @@ def load_nyc_data(path, data_name):
         'attr_scaler': attr_scaler
     }
     for name in ['train', 'val', 'test']:
-        # x = feature_scaler.transform(
-        #     raw_data[name]['x'][..., FEATURE_START:FEATURE_END] + 90)
-        # y = feature_scaler.transform(
-        #     raw_data[name]['y'][..., FEATURE_START:FEATURE_END] + 90)
-        x = np.log(raw_data[name]['x'][..., FEATURE_START:FEATURE_END] + 1.0)
-        y = np.log(raw_data[name]['y'][..., FEATURE_START:FEATURE_END] + 1.0)
-        x_attr = attr_scaler.transform(raw_data[name]['x'][..., ATTR_START:])
-        y_attr = attr_scaler.transform(raw_data[name]['y'][..., ATTR_START:])
-
+        x = raw_data[name]['x'][..., FEATURE_START:FEATURE_END]
+        y = raw_data[name]['y'][..., FEATURE_START:FEATURE_END]
+        x = (x - np.min(x)) / (np.max(x) - np.min(x))
+        y = (y - np.min(y)) / (np.max(y) - np.min(y))
+        x_attr = raw_data[name]['x'][..., ATTR_START:]
+        y_attr = raw_data[name]['y'][..., ATTR_START:]
+        x_attr = (x_attr - np.min(x_attr)) / (np.max(x_attr) - np.min(x_attr))
+        y_attr = (y_attr - np.min(y_attr)) / (np.max(y_attr) - np.min(y_attr))
         data = {}
         if name is 'train':
             edge_index, edge_attr = train_edge_index, train_edge_attr

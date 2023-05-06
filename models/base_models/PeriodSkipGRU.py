@@ -149,6 +149,7 @@ class PeriodSkipGRUWithGeoNodeEm(GRUSeq2Seq):
                                     gn_layer_num=kwargs['gn_layer_num'],
                                     activation='ReLU',
                                     dropout=dropout)
+        self.transform = nn.Linear(535, 535)
         self.out_net = nn.Linear(hidden_size * 2, output_size)
 
     def _format_input_data(self, data):
@@ -198,17 +199,19 @@ class PeriodSkipGRUWithGeoNodeEm(GRUSeq2Seq):
         graph_encoding = graph_encoding.permute(2, 1, 0, 3).flatten(
             1, 2)  # L x (B x N) x F
         h_encode = torch.cat([h_encode, graph_encoding], dim=-1)
-        # last_input = x_input[-1:]
-        last_input = torch.zeros_like(x_input[-1:])
+        last_input = x_input[-1:]
+        # last_input = torch.zeros_like(x_input[-1:])
         out_hidden, last_hidden = self.decoder(last_input, h_encode)
         out = self.out_net(out_hidden)  # T x (B x N) x F
         out = out.view(batch_num, node_num, out.shape[-1])  # B x N x F
+        # S = self.transform(data['S'])
+        out_matric = out * data['S']
         if type(data) is Batch:
             out = out.squeeze(0).permute(1, 0, 2)  # N x T x F
         if return_encoding:
             return out, encoder_h
         else:
-            return out
+            return out_matric
 
     def forward(self,
                 data,
