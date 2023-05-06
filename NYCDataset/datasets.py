@@ -83,26 +83,29 @@ def prepare_inputs_and_targets(I_data):
     week_before = week_before.reshape(-1, 535)[:-1]
     prev_interval = prev_interval.reshape(-1, 535)[:-1]
     X_I = np.stack((week_before, prev_interval), axis=1)
-    y_I = I_data[7:].reshape(-1, 535)[1:]
+    # y_I = I_data[7:].reshape(-1, 535)[1:]
 
-    return X_I, y_I
+    return X_I
 
 
 # 划分数据集
-def split_data(X, y, X_attr, Y_attr, train_days, val_days):
+def split_data(X, y, X_attr, Y_attr, S, train_days, val_days):
     train_len = train_days * 24
     val_len = val_days * 24
 
+    S_train = S[:train_len]
     x_attr_train = X_attr[:train_len]
     y_attr_train = Y_attr[:train_len]
     X_train = X[:train_len]
     y_train = y[:train_len]
 
+    S_val = S[train_len:train_len + val_len]
     X_val = X[train_len:train_len + val_len]
     y_val = y[train_len:train_len + val_len]
     x_attr_val = X_attr[train_len:train_len + val_len]
     y_attr_val = Y_attr[train_len:train_len + val_len]
 
+    S_test = S[train_len + val_len:]
     X_test = X[train_len + val_len:]
     y_test = y[train_len + val_len:]
     x_attr_test = X_attr[train_len + val_len:]
@@ -113,19 +116,22 @@ def split_data(X, y, X_attr, Y_attr, train_days, val_days):
             'x': torch.from_numpy(X_train).float(),
             'y': torch.from_numpy(y_train).float(),
             'x_attr': torch.from_numpy(x_attr_train).float(),
-            'y_attr': torch.from_numpy(y_attr_train).float()
+            'y_attr': torch.from_numpy(y_attr_train).float(),
+            'S': torch.from_numpy(S_train).float()
         },
         'val': {
             'x': torch.from_numpy(X_val).float(),
             'y': torch.from_numpy(y_val).float(),
             'x_attr': torch.from_numpy(x_attr_val).float(),
-            'y_attr': torch.from_numpy(y_attr_val).float()
+            'y_attr': torch.from_numpy(y_attr_val).float(),
+            'S': torch.from_numpy(S_val).float()
         },
         'test': {
             'x': torch.from_numpy(X_test).float(),
             'y': torch.from_numpy(y_test).float(),
             'x_attr': torch.from_numpy(x_attr_test).float(),
-            'y_attr': torch.from_numpy(y_attr_test).float()
+            'y_attr': torch.from_numpy(y_attr_test).float(),
+            'S': torch.from_numpy(S_test).float(),
         }
     }
 
@@ -145,19 +151,28 @@ def ODsplit_nyc_data(path, data_name):
     del data
     # OD矩阵划分
     I, S = OD_split(bike_data)
+    # 使用前一周的分离率作为预测的分离率
+    S = S[:-7, ...]
+    S = S.reshape(-1, 535, 535)[:-1]
     # 归一化
     od_max = np.max(I)
     od_min = np.min(I)
     I = (I - od_min) / (od_max - od_min)
     weather_data = (weather_data - np.min(weather_data)) / (
         np.max(weather_data) - np.min(weather_data))
-    X_I, Y_I = prepare_inputs_and_targets(I)
+    X_I = prepare_inputs_and_targets(I)
     x_attr, y_attr = weather_data[24 * 7:][:-1], weather_data[24 * 7:][1:]
     X_I = X_I[:, :, :, np.newaxis]
-    Y_I = Y_I[:, :, np.newaxis]
     x_attr = np.repeat(x_attr[:, np.newaxis, :, :], X_I.shape[1], axis=1)
     # 划分数据集
-    data_dict = split_data(X_I, Y_I, x_attr, y_attr, train_days=20, val_days=2)
+    Y = bike_data[24 * 7:-1]
+    data_dict = split_data(X_I,
+                           Y,
+                           x_attr,
+                           y_attr,
+                           S,
+                           train_days=20,
+                           val_days=2)
 
     for name in ['train', 'val', 'test']:
         print('{0}的x的shape为{1}'.format(name, data_dict[name]['x'].shape))

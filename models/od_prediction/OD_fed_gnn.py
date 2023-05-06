@@ -174,12 +174,10 @@ class ODFedNodePredictorClient(nn.Module):
                                                     is not None) else None
                 server_graph_encoding = server_graph_encoding.to(self.device)
                 data = dict(x=x, x_attr=x_attr, y=y, y_attr=y_attr)
-                # y_pred_val, y_pred_prob = self(data, server_graph_encoding)
                 y_pred = self(data, server_graph_encoding)
                 if name == 'test':
                     od_prediction.append(np.exp(y_pred.detach().cpu()) - 1.0)
                 loss = nn.MSELoss()(y_pred, y)
-                # loss = MyLoss()(y_pred_val, y_pred_prob, y)
                 num_samples += x.shape[0]
                 metrics = unscaled_metrics(y_pred, y, name)
                 epoch_log['{}/weighted_loss'.format(
@@ -390,14 +388,13 @@ class ODFedNodePredictor(LightningModule):
                     graph_encoding = h_encode.view(
                         h_encode.shape[0], batch_num, node_num,
                         h_encode.shape[2]).permute(2, 1, 0, 3)  # N x B x L x F
-                    graph_encoding = self.gcn(Data(
-                        x=graph_encoding,
-                        edge_index=self.data['train']['edge_index'].to(
-                            graph_encoding.device),
-                        edge_attr=self.data['train']['edge_attr'].unsqueeze(
-                            -1).unsqueeze(-1).unsqueeze(-1).to(
-                                graph_encoding.device)),
-                                              semantic_data=x)  # N x B x L x F
+                    graph_encoding = self.gcn(
+                        Data(x=graph_encoding,
+                             edge_index=self.data['train']['edge_index'].to(
+                                 graph_encoding.device),
+                             edge_attr=self.data['train']['edge_attr'].
+                             unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).to(
+                                 graph_encoding.device)))  # N x B x L x F
                     if epoch_i == self.hparams.server_epoch:
                         updated_graph_encoding.append(
                             graph_encoding.detach().clone().cpu())
@@ -463,14 +460,13 @@ class ODFedNodePredictor(LightningModule):
                                                h_encode.shape[2]).permute(
                                                    2, 1, 0, 3)  # N x B x L x F
                 #上面是hc，i 下面是hs，i
-                graph_encoding = self.gcn(Data(
-                    x=graph_encoding,
-                    edge_index=self.data[name]['edge_index'].to(
-                        graph_encoding.device),
-                    edge_attr=self.data[name]['edge_attr'].unsqueeze(
-                        -1).unsqueeze(-1).unsqueeze(-1).to(
-                            graph_encoding.device)),
-                                          semantic_data=x)  # N x B x L x F
+                graph_encoding = self.gcn(
+                    Data(x=graph_encoding,
+                         edge_index=self.data[name]['edge_index'].to(
+                             graph_encoding.device),
+                         edge_attr=self.data[name]['edge_attr'].unsqueeze(
+                             -1).unsqueeze(-1).unsqueeze(-1).to(
+                                 graph_encoding.device)))  # N x B x L x F
                 updated_graph_encoding.append(
                     graph_encoding.detach().clone().cpu())
         # update server_graph_encoding
@@ -776,7 +772,7 @@ class ODFedNodePredictor(LightningModule):
         return self.training_epoch_end(outputs)
 
 
-class ODFedAvgNodePredictor(ODFedNodePredictor):
+class ODFedAvg(ODFedNodePredictor):
     def __init__(self, hparams, *args, **kwargs):
         super().__init__(hparams, *args, **kwargs)
 

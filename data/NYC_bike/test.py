@@ -1,8 +1,7 @@
 import torch
 from torch.utils.data import TensorDataset
+import torch.nn as nn
 
-x_data = torch.randn(480, 2, 1, 1)
-y_data = torch.randn(480, 1, 1)
-print(x_data)
-dataset = TensorDataset(x_data, y_data)
-print(dataset)
+x_data = torch.randn(480, 535, 535, 1)
+a = nn.Linear(1, 1)
+print(a(x_data).shape)

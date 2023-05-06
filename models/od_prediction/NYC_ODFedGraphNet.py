@@ -50,12 +50,12 @@ class ODFedNodePredictorClient(nn.Module):
                                          batch_size=self.batch_size,
                                          shuffle=False,
                                          pin_memory=True)
-        self.val_dataloader = self.train_dataloader
+        # self.val_dataloader = self.train_dataloader
         self.test_dataloader = DataLoader(self.test_dataset,
                                           batch_size=self.batch_size,
                                           shuffle=False,
                                           pin_memory=True)
-        self.test_dataloader = self.train_dataloader
+        # self.test_dataloader = self.train_dataloader
         self.global_step = start_global_step
 
     def forward(self, x, server_graph_encoding):
@@ -82,18 +82,19 @@ class ODFedNodePredictorClient(nn.Module):
                 num_samples = 0
                 epoch_log = defaultdict(lambda: 0.0)
                 for batch in self.train_dataloader:
-                    x, y, x_attr, y_attr, server_graph_encoding = batch
+                    x, y, x_attr, y_attr, S, server_graph_encoding = batch
                     server_graph_encoding = server_graph_encoding.permute(
                         1, 0, 2, 3)
                     x = x.to(self.device) if (x is not None) else None
                     y = y.to(self.device) if (y is not None) else None
+                    S = S.to(self.device) if (S is not None) else None
                     x_attr = x_attr.to(self.device) if (x_attr
                                                         is not None) else None
                     y_attr = y_attr.to(self.device) if (y_attr
                                                         is not None) else None
                     server_graph_encoding = server_graph_encoding.to(
                         self.device)
-                    data = dict(x=x, x_attr=x_attr, y=y, y_attr=y_attr)
+                    data = dict(x=x, x_attr=x_attr, y=y, y_attr=y_attr, S=S)
                     # y_pred_val, y_pred_prob = self(data, server_graph_encoding)
                     y_pred = self(data, server_graph_encoding)
                     # loss = MyLoss()(y_pred_val, y_pred_prob, y)
@@ -130,20 +131,21 @@ class ODFedNodePredictorClient(nn.Module):
             num_samples = 0
             epoch_log = defaultdict(lambda: 0.0)
             for batch in dataloader:
-                x, y, x_attr, y_attr, server_graph_encoding = batch
+                x, y, x_attr, y_attr, S, server_graph_encoding = batch
                 server_graph_encoding = server_graph_encoding.permute(
                     1, 0, 2, 3)
                 x = x.to(self.device) if (x is not None) else None
                 y = y.to(self.device) if (y is not None) else None
+                S = S.to(self.device) if (S is not None) else None
                 x_attr = x_attr.to(self.device) if (x_attr
                                                     is not None) else None
                 y_attr = y_attr.to(self.device) if (y_attr
                                                     is not None) else None
                 server_graph_encoding = server_graph_encoding.to(self.device)
-                data = dict(x=x, x_attr=x_attr, y=y, y_attr=y_attr)
+                data = dict(x=x, x_attr=x_attr, y=y, y_attr=y_attr, S=S)
                 y_pred = self(data, server_graph_encoding)
                 if name == 'test':
-                    od_prediction.append(np.exp(y_pred.detach().cpu()) - 1.0)
+                    od_prediction.append(y_pred.detach().cpu() * 176)
                 loss = nn.MSELoss()(y_pred, y)
                 num_samples += x.shape[0]
                 metrics = unscaled_metrics(y_pred, y, name, self.od_max,
@@ -253,7 +255,8 @@ class ODFedNodePredictorServer(LightningModule):
         num_clients = data['train']['x'].shape[2]
         input_size = self.data['train']['x'].shape[-1] + self.data['train'][
             'x_attr'].shape[-1]
-        output_size = self.data['train']['y'].shape[-1]
+        # output_size = self.data['train']['y'].shape[-1]
+        output_size = 1
         client_params_list = []
         for client_i in range(num_clients):
             client_datasets = {}
@@ -263,6 +266,7 @@ class ODFedNodePredictorServer(LightningModule):
                     data[name]['y'][:, client_i:client_i + 1, :],
                     data[name]['x_attr'][:, :, client_i:client_i + 1, :],
                     data[name]['y_attr'][:, client_i:client_i + 1, :],
+                    data[name]['S'][:, client_i:client_i + 1, :],
                     torch.zeros(1, data[name]['x'].shape[0],
                                 self.hparams.gru_num_layers,
                                 self.hparams.hidden_size).float().permute(
@@ -299,7 +303,8 @@ class ODFedNodePredictorServer(LightningModule):
         for name in ['train', 'val', 'test']:
             self.server_datasets[name] = TensorDataset(
                 self.data[name]['x'], self.data[name]['y'],
-                self.data[name]['x_attr'], self.data[name]['y_attr'])
+                self.data[name]['x_attr'], self.data[name]['y_attr'],
+                data[name]['S'])
 
     def _train_server_gcn_with_agg_clients(self, device):
         # here we assume all clients are aggregated! Simulate running on clients with the aggregated copy on server
@@ -327,14 +332,14 @@ class ODFedNodePredictorServer(LightningModule):
                         pin_memory=True,
                     )
                 for batch in server_train_dataloader:
-                    x, y, x_attr, y_attr = batch
+                    x, y, x_attr, y_attr, S = batch
                     x = x.to(device) if (x is not None) else None
                     y = y.to(device) if (y is not None) else None
                     x_attr = x_attr.to(device) if (x_attr
                                                    is not None) else None
                     y_attr = y_attr.to(device) if (y_attr
                                                    is not None) else None
-
+                    S = S.to(device) if (S is not None) else None
                     if 'selected' in self.data['train']:
                         train_mask = self.data['train']['selected'].flatten()
                         x, y, x_attr, y_attr = x[:, :,
@@ -343,7 +348,7 @@ class ODFedNodePredictorServer(LightningModule):
                                                                                           train_mask, :], y_attr[:, :,
                                                                                                                  train_mask, :]
 
-                    data = dict(x=x, x_attr=x_attr, y=y, y_attr=y_attr)
+                    data = dict(x=x, x_attr=x_attr, y=y, y_attr=y_attr, S=S)
                     h_encode = self.base_model.forward_encoder(
                         data)  # L x (B x N) x F
                     batch_num, node_num = data['x'].shape[0], data['x'].shape[
@@ -386,12 +391,15 @@ class ODFedNodePredictorServer(LightningModule):
                 if self.data['train']['selected'][client_i, 0].item() is False:
                     continue
             client_params.update(train_dataset=TensorDataset(
-                self.data['train']['x'][:, :, client_i:client_i + 1, :],
-                self.data['train']['y'][:, client_i:client_i +
-                                        1, :], self.data['train']['x_attr']
-                [:, :, client_i:client_i +
-                 1, :], self.data['train']['y_attr'][:,
-                                                     client_i:client_i + 1, :],
+                self.data['train']['x'][:, :, client_i:client_i +
+                                        1, :], self.data['train']['y']
+                [:, client_i:client_i +
+                 1, :], self.data['train']['x_attr'][:, :, client_i:client_i +
+                                                     1, :], self.data['train']
+                ['y_attr'][:, client_i:client_i +
+                           1, :], self.data['train']['S'][:,
+                                                          client_i:client_i +
+                                                          1, :],
                 updated_graph_encoding[sel_client_i:sel_client_i +
                                        1, :, :, :].permute(1, 0, 2, 3)))
             sel_client_i += 1
@@ -411,7 +419,7 @@ class ODFedNodePredictorServer(LightningModule):
             self.base_model.eval()
             self.gcn.eval()
             for batch in server_dataloader:
-                x, y, x_attr, y_attr = batch
+                x, y, x_attr, y_attr, S = batch
                 x = x.to(device) if (x is not None) else None
                 y = y.to(device) if (y is not None) else None
                 x_attr = x_attr.to(device) if (x_attr is not None) else None
@@ -447,8 +455,10 @@ class ODFedNodePredictorServer(LightningModule):
                     self.data[name]['y'][:, client_i:client_i + 1, :],
                     self.data[name]['x_attr'][:, :, client_i:client_i + 1, :],
                     self.data[name]['y_attr'][:, client_i:client_i + 1, :],
+                    self.data[name]['S'][:, client_i:client_i + 1, :],
                     updated_graph_encoding[client_i:client_i +
                                            1, :, :, :].permute(1, 0, 2, 3))
+
                 # B x N x L x F
             })
 
@@ -684,7 +694,7 @@ class ODFedNodePredictorServer(LightningModule):
                 itertools.chain.from_iterable(local_val_results))
         self.base_model.to(server_device)
         self.gcn.to(server_device)
-        od_prediction = np.concatenate(od_prediction, axis=2)
+        od_prediction = np.concatenate(od_prediction, axis=1)
         if not os.path.exists('./output'):
             os.makedirs('./output')
         np.save(self.hparams['data_name'] + '_od_prediction.npy',
