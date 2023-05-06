@@ -1,8 +1,8 @@
-import torch
-from torch.utils.data import TensorDataset
+import numpy as np
 
-x_data = torch.randn(480, 2, 1, 1)
-y_data = torch.randn(480, 1, 1)
-print(x_data)
-dataset = TensorDataset(x_data, y_data)
-print(dataset)
+# 创建一个简单的二维数组
+a = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+
+# 沿着第一个轴（axis=0，行）向下滚动1个元素
+b = np.roll(a, shift=1, axis=0)
+print(b)

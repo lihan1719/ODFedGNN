@@ -21,9 +21,10 @@ import wandb
 
 # 定义评价指标
 def unscaled_metrics(y_pred, y, name, od_max, od_min):
-    y_pred = y_pred.detach().cpu() * (od_max - od_min) + od_min
-    y = y.detach().cpu() * (od_max - od_min) + od_min
-
+    # y_pred = y_pred.detach().cpu() * (od_max - od_min) + od_min
+    # y = y.detach().cpu() * (od_max - od_min) + od_min
+    y_pred = y_pred.detach().cpu()
+    y = y.detach().cpu()
     mse = ((y_pred - y)**2).mean()
     # RMSE
     rmse = torch.sqrt(mse)

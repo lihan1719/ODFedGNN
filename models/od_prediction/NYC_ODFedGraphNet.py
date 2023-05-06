@@ -82,11 +82,12 @@ class ODFedNodePredictorClient(nn.Module):
                 num_samples = 0
                 epoch_log = defaultdict(lambda: 0.0)
                 for batch in self.train_dataloader:
-                    x, y, x_attr, y_attr, server_graph_encoding = batch
+                    x, y, x_attr, y_attr, S, server_graph_encoding = batch
                     server_graph_encoding = server_graph_encoding.permute(
                         1, 0, 2, 3)
                     x = x.to(self.device) if (x is not None) else None
                     y = y.to(self.device) if (y is not None) else None
+                    S = S.to(self.device) if (S is not None) else None
                     x_attr = x_attr.to(self.device) if (x_attr
                                                         is not None) else None
                     y_attr = y_attr.to(self.device) if (y_attr
@@ -95,7 +96,8 @@ class ODFedNodePredictorClient(nn.Module):
                         self.device)
                     data = dict(x=x, x_attr=x_attr, y=y, y_attr=y_attr)
                     # y_pred_val, y_pred_prob = self(data, server_graph_encoding)
-                    y_pred = self(data, server_graph_encoding)
+                    y_I_pred = self(data, server_graph_encoding)
+                    y_pred = y_I_pred * S
                     # loss = MyLoss()(y_pred_val, y_pred_prob, y)
                     loss = nn.MSELoss()(y_pred, y)
                     self.optimizer.zero_grad()
@@ -130,18 +132,20 @@ class ODFedNodePredictorClient(nn.Module):
             num_samples = 0
             epoch_log = defaultdict(lambda: 0.0)
             for batch in dataloader:
-                x, y, x_attr, y_attr, server_graph_encoding = batch
+                x, y, x_attr, y_attr, S, server_graph_encoding = batch
                 server_graph_encoding = server_graph_encoding.permute(
                     1, 0, 2, 3)
                 x = x.to(self.device) if (x is not None) else None
                 y = y.to(self.device) if (y is not None) else None
+                S = S.to(self.device) if (S is not None) else None
                 x_attr = x_attr.to(self.device) if (x_attr
                                                     is not None) else None
                 y_attr = y_attr.to(self.device) if (y_attr
                                                     is not None) else None
                 server_graph_encoding = server_graph_encoding.to(self.device)
                 data = dict(x=x, x_attr=x_attr, y=y, y_attr=y_attr)
-                y_pred = self(data, server_graph_encoding)
+                y_I_pred = self(data, server_graph_encoding)
+                y_pred = y_I_pred * S
                 if name == 'test':
                     od_prediction.append(np.exp(y_pred.detach().cpu()) - 1.0)
                 loss = nn.MSELoss()(y_pred, y)
@@ -263,6 +267,7 @@ class ODFedNodePredictorServer(LightningModule):
                     data[name]['y'][:, client_i:client_i + 1, :],
                     data[name]['x_attr'][:, :, client_i:client_i + 1, :],
                     data[name]['y_attr'][:, client_i:client_i + 1, :],
+                    data[name]['S'][:, client_i:client_i + 1, :],
                     torch.zeros(1, data[name]['x'].shape[0],
                                 self.hparams.gru_num_layers,
                                 self.hparams.hidden_size).float().permute(
