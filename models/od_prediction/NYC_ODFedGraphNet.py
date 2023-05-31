@@ -96,7 +96,8 @@ class ODFedNodePredictorClient(nn.Module):
                         self.device)
                     data = dict(x=x, x_attr=x_attr, y=y, y_attr=y_attr, S=S)
                     # y_pred_val, y_pred_prob = self(data, server_graph_encoding)
-                    y_pred = self(data, server_graph_encoding)
+                    y_I_pred = self(data, server_graph_encoding)
+                    y_pred = y_I_pred * S
                     # loss = MyLoss()(y_pred_val, y_pred_prob, y)
                     loss = nn.MSELoss()(y_pred, y)
                     self.optimizer.zero_grad()
