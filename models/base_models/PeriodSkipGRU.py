@@ -7,8 +7,7 @@ import torch.nn.functional as F
 
 from torch_geometric.nn import GCNConv
 from torch_geometric.data import Batch, Data
-from models.base_models import WeightedGCN
-from models.base_models.GraphNets_v2 import GraphNet
+from models.base_models.GraphNets import GraphNet
 from models.base_models.GeoSemNodeEm import GeoSemNodeEm
 
 

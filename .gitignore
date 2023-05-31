@@ -1,8 +1,7 @@
-/test/
-
 /output/
 
-/baseline/
+/baseline-DCRNN/__pycache__
+
 
 /data/traffic
 /data/NYC_bike/__pycache__
@@ -18,8 +17,11 @@ datasets/__pycache__
 
 output
 utils/__pycache__
-test
+
 cash
 .vscode/*
 
-ODCRN-main
+model_save
+
+data/NYC_bike/test.py
+data/NYC_bike/test2.py

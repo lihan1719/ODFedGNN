@@ -348,8 +348,8 @@ def load_nyc_data(path, data_name):
     train_adj_mx_ts, eval_adj_mx_ts = adj_mx_ts, adj_mx_ts
     train_edge_index, train_edge_attr = dense_to_sparse(train_adj_mx_ts)
     eval_edge_index, eval_edge_attr = dense_to_sparse(eval_adj_mx_ts)
+
     raw_data = {}
-    #划分数据集载入
     for name in ['train', 'val', 'test']:
         file = 'NYC_BOD_' + name + '_' + data_name + '.npz'
         raw_data[name] = np.load(os.path.join(path, file))

@@ -4,6 +4,7 @@ from argparse import ArgumentParser
 from multiprocessing import cpu_count
 from copy import deepcopy
 from collections import defaultdict
+import os
 
 import torch
 import torch.nn as nn
@@ -12,6 +13,7 @@ from pytorch_lightning import LightningModule
 from torch_geometric.data import DataLoader, Data
 from torch_geometric.utils import to_dense_adj
 from torch.utils.data import TensorDataset
+from datasets.NYC_BOD import load_nyc_data
 from datasets.st_datasets import load_dataset
 import models.base_models as base_models
 from models.base_models import *
@@ -20,30 +22,34 @@ import wandb
 
 
 # 定义评价指标
-def unscaled_metrics(y_pred, y, name, od_max=176, od_min=0):
-    # y_pred = y_pred.detach().cpu() * (od_max - od_min) + od_min
-    # y = y.detach().cpu() * (od_max - od_min) + od_min
-    y_pred = y_pred.detach().cpu()
-    y = y.detach().cpu()
+def unscaled_metrics(y_pred, y, name, feature_scaler):
+    try:
+        y_pred = feature_scaler.inverse_transform(
+            y_pred.detach().cpu().numpy())
+        y = feature_scaler.inverse_transform(y.detach().cpu().numpy())
+    except:
+        y_pred = feature_scaler.inverse_transform(y_pred)
+        y = feature_scaler.inverse_transform(y)
 
     def WRMSE(y_pred, y_true):
         errors = y_true - y_pred
         squared_errors = errors**2
         weighted_squared_errors = y_true * squared_errors
-        sum_weighted_squared_errors = torch.sum(weighted_squared_errors)
-        sum_weights = torch.sum(y_true)
-        return torch.sqrt(sum_weighted_squared_errors / sum_weights)
+        sum_weighted_squared_errors = np.sum(weighted_squared_errors)
+        sum_weights = np.sum(y_true)
+        return np.sqrt(sum_weighted_squared_errors / (sum_weights + 0.001))
 
     wrmse = WRMSE(y_pred, y)
-
+    if np.isnan(wrmse):
+        print('error')
     mse = ((y_pred - y)**2).mean()
     # RMSE
-    rmse = torch.sqrt(mse)
+    rmse = np.sqrt(mse)
     # MAE
-    mae = torch.abs(y_pred - y).mean()
+    mae = np.abs(y_pred - y).mean()
     return {
-        '{}/rmse'.format(name): rmse.detach(),
-        '{}/wrmse'.format(name): wrmse.detach(),
+        '{}/rmse'.format(name): rmse,
+        '{}/wrmse'.format(name): wrmse,
     }
 
 
@@ -59,30 +65,45 @@ class HApredicter:
 
     def train_test(self):
         # 导入数据
-        data = load_dataset(dataset_name=self.hparams.dataset,
-                            data_dir=self.hparams.data_dir,
-                            data_name=self.hparams.data_name)
+        data = load_nyc_data(path=self.hparams.data_dir, params=self.hparams)
         self.data = data
         train_x, val_x, test_x = data['train']['x'], data['val']['x'], data[
             'test']['x']
         x = np.concatenate([train_x, val_x, test_x], axis=0)
         train_y, val_y, test_y = data['train']['y'], data['val']['y'], data[
             'test']['y']
-        y = np.concatenate([train_y, val_y, test_y])
-        # 返回原值求误差
-        x_true = self.data['feature_scaler'].inverse_transform(x)
-        y_true = self.data['feature_scaler'].inverse_transform(y)
+        y = np.concatenate([train_y, val_y, test_y], axis=0)
         # x的时间步的平均是要预测y时间步的第一个值
-        y_pred = y_true[:, 0:1, :, :, :]
-        x_predict = np.mean(x_true, axis=1, keepdims=True)
-        mse = ((y_pred - x_predict)**2).mean()
-        mae = np.abs(y_pred - y).mean()
-        rmse = np.sqrt(mse)
-        return mse, mae, rmse
+        y_true = y[:, 0:1, :, :]
+        y_pred = np.mean(x, axis=1, keepdims=True)
+        metrics = unscaled_metrics(y_pred, y_true, 'test',
+                                   self.data['feature_scaler'])
+        y_true = self.data['feature_scaler'].inverse_transform(y_true)
+        y_pred = self.data['feature_scaler'].inverse_transform(y_pred)
+        os.makedirs(self.hparams.output_dir + '/' + self.hparams.model_name,
+                    exist_ok=True)
+        # 保存指标与预测结果
+        with open(
+                self.hparams.output_dir + '/' + self.hparams.model_name + '/' +
+                'prediction_scores.txt', 'a') as f:
+            f.write('历史观测长度:{0},预测长度:{1}'.format(self.hparams.obs_len,
+                                                 self.hparams.pred_len))
+            f.write('\n')
+            for key, value in metrics.items():
+                f.write('{0}:{1}'.format(key, value))
+            f.write('\n\n\n')
+        np.save(
+            self.hparams.output_dir + '/' + self.hparams.model_name + '/' +
+            'od_prediction.npy', y_pred)
+        np.save(
+            self.hparams.output_dir + '/' + self.hparams.model_name + '/' +
+            'od_groundtruth.npy', y_true)
+
+        return None
 
 
 # GRUSeq2Seq(65k)
-class ODPredictor(LightningModule):
+class ODGRUSeq2Seq(LightningModule):
     def __init__(self, hparams, *args, **kwargs):
         super().__init__()
         self.hparams = hparams
@@ -113,32 +134,15 @@ class ODPredictor(LightningModule):
     def setup(self, step):
         if self.base_model is not None:
             return
-        data = load_dataset(dataset_name=self.hparams.dataset,
-                            data_dir=self.hparams.data_dir,
-                            data_name=self.hparams.data_name)
+        data = load_nyc_data(path=self.hparams.data_dir, params=self.hparams)
         self.data = data
         input_size = self.data['train']['x'].shape[-1] + self.data['train'][
             'x_attr'].shape[-1]
         output_size = self.data['train']['y'].shape[-1]
 
-        assert not ((self.base_model_class is base_models.DCRNNModel) and
-                    (self.hparams.hetero_graph))
-
-        if self.base_model_class is base_models.DCRNNModel:
-            self.base_model = self.base_model_class(
-                adj_mx=to_dense_adj(self.data['train']['edge_index'],
-                                    edge_attr=self.data['train']
-                                    ['edge_attr']).data.cpu().numpy()[0],
-                num_graph_nodes=self.data['train']['x'].shape[2],
-                input_dim=self.data['train']['x'].shape[-1],
-                output_dim=output_size,
-                seq_len=self.data['train']['x'].shape[1],
-                horizon=self.data['train']['y'].shape[1],
-                **self.hparams)
-        else:
-            self.base_model = self.base_model_class(input_size=input_size,
-                                                    output_size=output_size,
-                                                    **self.hparams)
+        self.base_model = self.base_model_class(input_size=input_size,
+                                                output_size=output_size,
+                                                **self.hparams)
         self.datasets = {}
         for name in ['train', 'val', 'test']:
             if self.hparams.hetero_graph:
@@ -162,12 +166,6 @@ class ODPredictor(LightningModule):
                     dict(edge_index=self.data[name]['edge_index'],
                          edge_attr=self.data[name]['edge_attr'])
                 }
-        # init layer params of DCRNN
-        if self.base_model_class is base_models.DCRNNModel:
-            temp_dataloader = DataLoader(self.datasets['val']['dataset'],
-                                         batch_size=1)
-            batch = next(iter(temp_dataloader))
-            self.validation_step(batch, None)
 
     def train_dataloader(self):
         return DataLoader(self.datasets['train']['dataset'],
@@ -188,19 +186,9 @@ class ODPredictor(LightningModule):
                           num_workers=1)
 
     def configure_optimizers(self):
-        if self.base_model_class is base_models.DCRNNModel:
-            optimizer = torch.optim.Adam(
-                self.parameters(),
-                lr=self.hparams['lr'],
-                eps=1e-3,
-                weight_decay=self.hparams.weight_decay)
-            scheduler = torch.optim.lr_scheduler.MultiStepLR(
-                optimizer=optimizer, milestones=[20, 30, 40, 50], gamma=0.1)
-            return [optimizer], [scheduler]
-        else:
-            return torch.optim.Adam(self.parameters(),
-                                    lr=self.hparams['lr'],
-                                    weight_decay=self.hparams.weight_decay)
+        return torch.optim.Adam(self.parameters(),
+                                lr=self.hparams['lr'],
+                                weight_decay=self.hparams.weight_decay)
 
     def training_step(self, batch, batch_idx):
         if self.hparams.hetero_graph:
@@ -219,29 +207,69 @@ class ODPredictor(LightningModule):
         y_pred = self(data)
         loss = nn.MSELoss()(y_pred, y)
 
-        log = {'train/weighted_loss': loss, 'num': y_pred.shape[0]}
+        log = {'train/loss': loss, 'num': y_pred.shape[0]}
         # log.update(**unscaled_metrics(y_pred, y, self.data['feature_scaler'],
         #                               'train'))
-        log.update(**unscaled_metrics(y_pred, y, 'train'))
+        log.update(**unscaled_metrics(y_pred, y, 'train',
+                                      self.data['feature_scaler']))
         return {'loss': loss, 'progress_bar': log, 'log': log}
 
     def training_epoch_end(self, outputs):
         # average all statistics (weighted by sample counts)
         log = {}
-        for output in outputs:
-            for k in output['log']:
-                if k not in log:
-                    log[k] = 0
-                if k == 'num':
-                    log[k] += output['log'][k]
-                else:
-                    log[k] += (output['log'][k] * output['log']['num'])
-        for k in log:
-            if k != 'num':
-                log[k] = log[k] / log['num']
-        log.pop('num')
-        # log to wandb
-        self.epoch += 1
+        if isinstance(outputs[0], tuple):
+            for output in outputs:
+                for k in output[0]['log']:
+                    if k not in log:
+                        log[k] = 0
+                    if k == 'num':
+                        log[k] += output[0]['log'][k]
+                    else:
+                        log[k] += (output[0]['log'][k] *
+                                   output[0]['log']['num'])
+            for k in log:
+                if k != 'num':
+                    log[k] = log[k] / log['num']
+            log.pop('num')
+            with open(
+                    self.hparams.output_dir + '/' +
+                    self.hparams['model_name'] + '/' + 'prediction_scores.txt',
+                    'a') as f:
+                f.write('历史观测长度:{0},预测长度:{1}'.format(self.hparams.obs_len,
+                                                     self.hparams.pred_len))
+                f.write('\n')
+                for key, value in log.items():
+                    f.write('{0}:{1}'.format(key, value))
+                    f.write('\n')
+                f.write('\n\n\n')
+            od_predictions = []
+            od_groundtruths = []
+            for pred in outputs:
+                od_predictions.append(pred[1]['prediction'])
+                od_groundtruths.append(pred[1]['prediction'])
+            od_predictions = np.concatenate(od_predictions)
+            od_groundtruths = np.concatenate(od_groundtruths)
+            np.save(
+                self.hparams.output_dir + '/' + self.hparams['model_name'] +
+                '/' + 'od_prediction.npy', od_predictions)
+            np.save(
+                self.hparams.output_dir + '/' + self.hparams['model_name'] +
+                '/' + 'od_groundtruth.npy', od_groundtruths)
+
+        else:
+            for output in outputs:
+                for k in output['log']:
+                    if k not in log:
+                        log[k] = 0
+                    if k == 'num':
+                        log[k] += output['log'][k]
+                    else:
+                        log[k] += (output['log'][k] * output['log']['num'])
+            for k in log:
+                if k != 'num':
+                    log[k] = log[k] / log['num']
+            log.pop('num')
+
         if self.hparams['wandb']:
             wandb.log(log)
         return {'log': log, 'progress_bar': log}
@@ -263,10 +291,9 @@ class ODPredictor(LightningModule):
         y_pred = self(data)
         loss = nn.MSELoss()(y_pred, y)
 
-        log = {'val/weighted_loss': loss, 'num': y_pred.shape[0]}
-        # log.update(
-        #     **unscaled_metrics(y_pred, y, self.data['feature_scaler'], 'val'))
-        log.update(**unscaled_metrics(y_pred, y, 'val'))
+        log = {'val/loss': loss, 'num': y_pred.shape[0]}
+        log.update(
+            **unscaled_metrics(y_pred, y, 'val', self.data['feature_scaler']))
 
         return {'loss': loss, 'progress_bar': log, 'log': log}
 
@@ -274,6 +301,8 @@ class ODPredictor(LightningModule):
         return self.training_epoch_end(outputs)
 
     def test_step(self, batch, batch_idx):
+        # if 'od_predictions' not in locals():
+        #     od_predictions = []
         if self.hparams.hetero_graph:
             x, y, x_attr, y_attr = batch['x'], batch['y'], batch[
                 'x_attr'], batch['y_attr']
@@ -289,14 +318,27 @@ class ODPredictor(LightningModule):
                         edge_attr=graph['edge_attr'].to(x.device))
         y_pred = self(data)
         loss = nn.MSELoss()(y_pred, y)
-        np.save(
-            './output' + '/' + self.hparams['data_name'] +
-            '_od_prediction.npy',
-            y_pred.detach().clone().cpu())
-        log = {'test/weighted_loss': loss, 'num': y_pred.shape[0]}
-        log.update(**unscaled_metrics(y_pred, y, 'test'))
+        log = {'test/loss': loss, 'num': y_pred.shape[0]}
+        log.update(
+            **unscaled_metrics(y_pred, y, 'test', self.data['feature_scaler']))
 
-        return {'loss': loss, 'progress_bar': log, 'log': log}
+        od_prediction = self.data['feature_scaler'].inverse_transform(
+            y_pred).detach().cpu().numpy()
+        od_groundtruth = self.data['feature_scaler'].inverse_transform(
+            y).cpu().numpy()
+
+        os.makedirs(self.hparams.output_dir + '/' + self.hparams['model_name'],
+                    exist_ok=True)
+
+        return {
+            'loss': loss,
+            'progress_bar': log,
+            'log': log,
+            'mode': 'test'
+        }, {
+            'prediction': od_prediction,
+            'groundtruth': od_groundtruth
+        }
 
     def test_epoch_end(self, outputs):
         return self.training_epoch_end(outputs)

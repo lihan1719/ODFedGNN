@@ -45,11 +45,11 @@ def main(args, temp_args):
             setattr(args, key, value)
     # 模型保存（保留最后一个，以及val最好的一个）
     # 提前停止训练
-    early_stop_callback = EarlyStopping(monitor='val/weighted_loss',
+    early_stop_callback = EarlyStopping(monitor='val/loss',
                                         patience=args.early_stop_patience,
                                         mode='min',
                                         verbose=True)
-    checkpoint_callback = ModelCheckpoint(monitor='val/weighted_loss',
+    checkpoint_callback = ModelCheckpoint(monitor='val/loss',
                                           save_top_k=1,
                                           save_last=True,
                                           mode='min',
@@ -57,7 +57,8 @@ def main(args, temp_args):
 
     trainer = Trainer.from_argparse_args(
         args,
-        default_root_dir='cash/artifacts',
+        default_root_dir='model_save/{0}_{1}/'.format(args.model_name,
+                                                      args.pred_len),
         deterministic=True,
         early_stop_callback=early_stop_callback,
         checkpoint_callback=checkpoint_callback,
@@ -65,9 +66,8 @@ def main(args, temp_args):
     )
 
     if args.model_name == 'HApredicter':
-        ha = HApredicter(hparams=args, TIMESTEP_IN=6, TIMESTEP_OUT=6)
-        mse, mae, rmse = ha.train_test()
-        wandb.log({'test/mse': mse, 'test/mae': mae, 'test/rmse': rmse})
+        ha = HApredicter(hparams=args, TIMESTEP_IN=4, TIMESTEP_OUT=4)
+        ha.train_test()
         return None
 
     if args.train:
@@ -76,7 +76,8 @@ def main(args, temp_args):
         if args.restore_train_ckpt_path != '':
             trainer = Trainer(
                 resume_from_checkpoint=args.restore_train_ckpt_path,
-                default_root_dir='cash/artifacts',
+                default_root_dir='model_save/{0}_{1}/'.format(
+                    args.model_name, args.pred_len),
                 deterministic=True,
                 early_stop_callback=early_stop_callback,
                 checkpoint_callback=checkpoint_callback,
@@ -122,6 +123,23 @@ if __name__ == '__main__':
     parser.add_argument('--load_test_ckpt_path', type=str, default='')
     parser.add_argument('--restore_train_ckpt_path', type=str, default='')
     parser.add_argument('--notrain', dest='train', action='store_false')
+    parser.add_argument('--split_ratio',
+                        type=float,
+                        nargs='+',
+                        help='训练、验证、测试天数'
+                        ' Example: 7 1 2',
+                        default=[7, 1, 2])
+    parser.add_argument('-obs',
+                        '--obs_len',
+                        type=int,
+                        help='Length of observation sequence',
+                        default=4)
+    parser.add_argument('-pred',
+                        '--pred_len',
+                        type=int,
+                        help='Length of prediction sequence',
+                        default=4)
+    parser.add_argument('-out', '--output_dir', type=str, default='./output')
     parser.add_argument('--early_stop_patience', type=int, default=10)
     parser.add_argument('--project', type=str, default='odfedgnn')
     # 设置wandb参数
